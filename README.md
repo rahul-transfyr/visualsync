@@ -16,177 +16,164 @@
     ·
   </p>
 
-<p align="center"> 
-<img src="assets/vsync.png" alt="Demo VisualSync" />
-</p>
-
   <p align="center">
     <a href='https://drive.google.com/file/d/1-MwQRWBm_I3576gBaC_f7D3iYcFpiox0/view?usp=sharing'>
       <img src='https://img.shields.io/badge/Paper-PDF-green?style=flat&logo=arXiv&logoColor=green' alt='Paper PDF'></a>
     <a href='https://arxiv.org/abs/2512.02017'><img src='https://img.shields.io/badge/arXiv-2512.02017-b31b1b.svg'  alt='Arxiv'></a>
     <a href='https://stevenlsw.github.io/visualsync/' style='padding-left: 0.5rem;'>
       <img src='https://img.shields.io/badge/Project-Page-blue?style=flat&logo=Google%20chrome&logoColor=blue' alt='Project Page'></a>
-    <!-- <a href='' style='padding-left: 0.5rem;'><img src='https://colab.research.google.com/assets/colab-badge.svg' alt='Google Colab'></a>
-    <a href='https://youtu.be/' style='padding-left: 0.5rem;'>
-      <img src='https://img.shields.io/badge/Youtube-Video-red?style=flat&logo=youtube&logoColor=red' alt='Youtube Video'></a> -->
   </p>
 
 </p>
 <br />
 
-This repository contains the pytorch implementation for the paper [VisualSync: Multi-Camera Synchronization via Cross-View Object Motion](https://stevenlsw.github.io/visualsync/), NeurIPS 2025. **VisualSync** aligns unsynchronized multi-view videos by matching object motion with epipolar cues. The synchronized outputs can benefit dynamic reconstruction, novel view synthesis, and multi-view data engines.
-
-
-## Overview
-![overview](assets/method.png)
-
-## 📄 Table of Contents
-
-- [Installation](#installation)
-- [In-the-Wild Demo](#in-the-wild-demo)
-- [Data Preprocessing](#preprocessing)
-- [Citation](#citation)
-
+This repository contains the PyTorch implementation for [VisualSync: Multi-Camera Synchronization via Cross-View Object Motion](https://stevenlsw.github.io/visualsync/), NeurIPS 2025. **VisualSync** aligns unsynchronized multi-view videos by matching object motion with epipolar cues.
 
 ## Installation
 
-- Clone this repository: 
-    ```Shell
-    git clone https://github.com/stevenlsw/visualsync.git
-    cd visualsync
-    ```
+Clone the repository and install dependencies:
 
-- Install Conda Environment
-    > **Note:** This installation is tested to work with **CUDA 12.4**.
-    ```bash
-    bash scripts/install.sh # create conda env visualsync
-    conda activate visualsync
-    ```
+```bash
+git clone https://github.com/stevenlsw/visualsync.git
+cd visualsync
+bash scripts/install.sh   # creates conda env 'visualsync'
+conda activate visualsync
+```
 
-- Download Model Weights
-    ```bash
-    bash scripts/download_weights.sh
-    ```
+> Tested with CUDA 12.4.
 
+## Data format
 
-## In-the-Wild Demo
-We show how to synchronize 3 EFL views. 
+Place raw videos under `raw_data/<scene>/` as `.mp4` files, one per camera. All other directories are created automatically by the pipeline.
 
-| View 1 | View 2 | View 3 |
-|:-------:|:-------:|:-------:|
-| ![EFL Video 1](assets/Z5TlCImQNK0_150_200.gif) | ![EFL Video 2](assets/Z5TlCImQNK0_575_625.gif) | ![EFL Video 3](assets/Z5TlCImQNK0_800_860.gif) |
+```
+raw_data/
+  scene1/
+    cam1.mp4
+    cam2.mp4
+    ...
+data/                              ← created automatically
+  scene1/
+    scene1_cam1/
+      rgb/                         ← extracted frames ('extract')
+      gpt_video/                   ← dynamic object tags ('tags')
+      gsam2/
+        mask/                      ← segmentation masks ('sam2')
+        vis/                       ← segmentation visualizations ('sam2')
+      vggt/                        ← per-cam camera parameters ('vggt')
+      cotracker/                   ← pixel-level tracks ('cotracker')
+      mast3r/                      ← cross-cam correspondences ('match')
+    scene1_cam2/
+      ...
+    vggt_output/                   ← COLMAP-format pose export ('vggt')
+    videos/                        ← merged mp4s for CoTracker input ('merge')
+results/                           ← created automatically
+  scene1/
+    scene1_cam1__scene1_cam2/      ← sync outputs ('sync')
+```
 
-### Step-0: Preprocess
----
- We provide the preprocessed data for the demo at [](). Please download and unzip, place it in the `data` directory. For custom videos, please follow the data [preprocessing](#preprocessing) steps below.
-```Shell
-  data/Z5TlCImQNK0/
-    ├── Z5TlCImQNK0_150_200/
-    │   ├── rgb/ # store video frames
-    │   ├── deva/ # store dynamic object masks
-    │   ├── vggt/ # store camera parameters
-    │   ├── cotracker/ # store tracking results
-    ├── Z5TlCImQNK0_575_625/
-    ├── Z5TlCImQNK0_800_860/
-  ```
+## Running the pipeline
 
-### Step-1: Cross-view matching
----
-- Visualize cross-view matching:
+The end-to-end pipeline is driven by a single script:
 
-![cross-view-matching](assets/cross_view_matching.png)
+```bash
+python scripts/run_pipeline.py --scene scene1
+```
 
+This runs all steps in order:
 
-### Step-2: Pairwise synchronization
----
-- Visualize the energy landscape, the X-axis is the offsete, Y-axis is the synchronization Sampson error.
-<!-- ![energy-landscape](assets/pairwise_energy.png) -->
-<p align="center">
-  <img src="assets/pairwise_energy.png" alt="key-frames" width="50%">
-</p>
+| Step | Name | What it does |
+|------|------|--------------|
+| 0 | `weights` | Download SAM2 / MASt3R / VGGT checkpoints |
+| 1 | `extract` | Extract frames from `.mp4` files into `data/<scene>/<scene>_camN/rgb/` |
+| 2 | `tags` | Write `gpt_video/tags.json` (dynamic object labels) into each cam dir |
+| 3 | `sam2` | Run Grounded-SAM2 to segment dynamic objects per frame |
+| 4 | `vggt` | Estimate camera poses with VGGT, export as COLMAP |
+| 5 | `merge` | Merge rgb/mask frames into `.mp4` videos for CoTracker |
+| 6 | `cotracker` | Run CoTracker per camera to get pixel-level tracks |
+| 7 | `match` | Run MASt3R to establish cross-cam correspondences |
+| 8 | `sync` | Estimate temporal sync offsets per camera pair |
 
-### Step-3: Global synchronization
----
-- Visualize the synchronization results at each time step from all views.
+## Options
 
-![key-frames](assets/keyframe.png){width=50%}
+### Required
 
+| Flag | Description |
+|------|-------------|
+| `--scene` | Scene name, e.g. `scene1` |
 
-## Preprocessing
-Given custom videos, follow the following steps to preprocess the data and run synchronization follow [in-the-wild demo](#in-the-wild-demo).
+### Paths
 
-### 1. Dataset Preparation
----
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--data-dir` | `data/` | Root directory for input data |
+| `--results-dir` | `results/` | Root directory for outputs |
 
-- The dataset is organized in the following structure. The main data directory (e.g., `DATA_DIR`) can be named anything, but the subdirectories must follow this format for the preprocessing scripts to work correctly:
-    ```text
-    DATA_DIR/
-    ├── scene1_cam1/
-    │   └── rgb/
-    │       ├── <img_name>1.jpg
-    │       ├── <img_name>2.jpg
-    │       └── ...
-    ├── scene1_cam2/
-    │   └── rgb/
-    │       └── ...
-    ├── scene1_3/
-    │   └── rgb/
-    │       └── ...
-    └── scene2_1/
-        └── rgb/
-            └── ...
-    ```
-- **Important Formatting Rules:**
-    * **Scene Grouping:** The name of each video directory must have its **scene name before the first underscore** to identify scenes and views (e.g., `scene1_cam1` and `scene1_3` are grouped as `scene1`). This is critical for the VGGT and segmentation scripts.
-    * **Image Directory:** All video frames (images) must be stored in a subdirectory named `rgb`.
-    * **Static Cameras:** If a video directory name contains **"cam"** (e.g., `scene1_cam1`), it is treated as a static camera. For these videos, **only the first image** will be used for pose prediction, for dynamic cameras (not include `cam` in its name) all images will be used for pose estimation.
+### Step control
 
+| Flag | Description |
+|------|-------------|
+| `--skip weights,extract,...` | Skip one or more steps (comma-separated) |
+| `--only match,sync` | Run only the specified steps, skip everything else |
 
-### 2. Dynamic Object Segmentation
----
+Valid step names: `weights`, `extract`, `tags`, `sam2`, `vggt`, `merge`, `cotracker`, `match`, `sync`.
 
-There are multiple ways for video dynamic object segmentation. Here we follow [Uni4D](https://github.com/Davidyao99/uni4d/). We use GPT to recognize dynamic objects in the video and use [SAM2](https://github.com/facebookresearch/sam2) to segment dynamic objects per frame and use [DEVA](https://github.com/hkchengrex/Tracking-Anything-with-DEVA/) to track across frames. User can simply use latest [SAM2](https://github.com/facebookresearch/sam2) for dynamic object tracking and bypass below steps.
+### Dynamic object tags
 
-- 1. [Optional] Find your API key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys) and set it as an environment variable (bypass by specifying dynamic object names in SAM2)
-    ```bash
-    export "OPENAI_API_KEY=sk-your_api_key_here" # (Be sure to replace `sk-your_api_key_here` with your actual key.)
-    ```
-    
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--tags-file` | built-in | Path to a JSON file with `{"dynamic": ["label1", ...]}` broadcast to every cam |
 
-- 2. [Optional] Call GPT to identify dynamic objects (bypass by specifying dynamic object names in SAM2)
-    ```bash
-    python preprocess/run_gpt.py --workdir data/python preprocess/run_gpt.py --sample 30
-    ```
+The built-in default tags are: `man`, `woman`, `pipette`, `hand`.
 
-- 3. Run GroundingDINO SAM2 to segment dynamic objects
-    ```bash
-    python preprocess/run_dino_sam2.py --workdir data/Z5TlCImQNK0
-    ```
-- 4. [Optional] Run DEVA to track dynamic objects (bypass by running video segmentation in SAM2)
-    ```bash
-    cd Tracking-Anything-with-DEVA/
-    python evaluation/eval_with_detections.py --workdir data/Z5TlCImQNK0 --max_missed_detection_count 9000 --output-dir deva
-    cd ..
-    ```
-- The output segmentation visualization:
+### CoTracker
 
-  ![segmentation](assets/Z5TlCImQNK0_150_200_seg.gif)
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--cotracker-grid-size` | `100` | Grid size for track seeding |
+| `--cotracker-model-type` | `offline` | `online` or `offline` |
+| `--cotracker-device` | `auto` | `auto` (cuda > mps > cpu), `cuda`, `mps`, or `cpu` |
+| `--cotracker-cpu-fallback` / `--no-cotracker-cpu-fallback` | enabled | Retry on CPU if CUDA OOMs |
 
-## 3. Camera Pose Estimation
+### MASt3R matching & sync
 
-- Run VGG-T to get camera pose estimation. Beside saving the camera parameters, it will also save the visualization as colmap format under `vggt_output` directory for visualization or debug.
-    ```bash
-    python preprocess/vggt_to_colmap.py --workdir data/Z5TlCImQNK0 --vis_path vggt_output --save_colmap
-    ```
-## 4. Pixel-level Tracking 
-- Run CoTracker3 to get tracking results:
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--vggt-suffix` | `300` | Frame count suffix for `camera_parameters_<suffix>.npz` |
+| `--offset-range` | `150` | Max frame offset to search during sync |
+| `--pairs` | all pairs | Cam-index pairs to match/sync, e.g. `1-2,1-3,2-3` |
 
-  ![tracking](assets/Z5TlCImQNK0_150_200_track.gif)
+## Examples
 
+Run everything for a new scene:
+```bash
+python scripts/run_pipeline.py --scene scene1
+```
+
+Skip weight download and frame extraction if already done:
+```bash
+python scripts/run_pipeline.py --scene scene1 --skip weights,extract
+```
+
+Re-run only the matching and sync steps:
+```bash
+python scripts/run_pipeline.py --scene scene1 --only match,sync
+```
+
+Run on a specific subset of camera pairs:
+```bash
+python scripts/run_pipeline.py --scene scene1 --only match,sync --pairs 1-2,1-3
+```
+
+Use custom dynamic object labels:
+```bash
+python scripts/run_pipeline.py --scene scene1 --tags-file my_tags.json
+```
 
 ## Citation
-```BiBTeX
-@inproceedings{liu2025visualsync},
+
+```bibtex
+@inproceedings{liu2025visualsync,
   title={VisualSync: Multi-Camera Synchronization via Cross-View Object Motion},
   author={Liu, Shaowei and Yao, David Yifan and Gupta, Saurabh and Wang, Shenlong},
   booktitle={NeurIPS},
@@ -194,11 +181,11 @@ There are multiple ways for video dynamic object segmentation. Here we follow [U
 }
 ```
 
+## Acknowledgements
 
-## Acknowledgement
-- [Uni4D](https://github.com/Davidyao99/uni4d/) for dynamic object segmentation.
-- [SAM2](https://github.com/facebookresearch/sam2) for video segmentation.
-- [DEVA](https://github.com/hkchengrex/Tracking-Anything-with-DEVA/) for video segmentation.
-- [CoTracker3](https://github.com/facebookresearch/co-tracker) for video tracking. 
-- [VGGT](https://github.com/facebookresearch/vggt) for camera pose estimation.
-- [MASt3R](https://github.com/naver/mast3r) for cross-view correspondence.
+- [SAM2](https://github.com/facebookresearch/sam2) for video segmentation
+- [DEVA](https://github.com/hkchengrex/Tracking-Anything-with-DEVA/) for object tracking
+- [CoTracker3](https://github.com/facebookresearch/co-tracker) for pixel-level tracking
+- [VGGT](https://github.com/facebookresearch/vggt) for camera pose estimation
+- [MASt3R](https://github.com/naver/mast3r) for cross-view correspondence
+- [Uni4D](https://github.com/Davidyao99/uni4d/) for dynamic object segmentation

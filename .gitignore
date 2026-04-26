@@ -1,5 +1,6 @@
 # PyTorch weights
 *.pt
+.DS_Store
 
 # PyTorch model states (WARNING: executable)
 *.pth
