@@ -1,6 +1,13 @@
+.DS_Store
+
+# Folders
+data/raw_data
+data/scene*
+results/
+temp/
+
 # PyTorch weights
 *.pt
-.DS_Store
 
 # PyTorch model states (WARNING: executable)
 *.pth
